@@ -2,6 +2,7 @@ import express from 'express';
 import { registerPlayer, recordPlayerExit, runBattleRoyale } from '../jobs/battleRoyal.js';
 import { readBattleRoyaleState } from '../../battleStateManager.js';
 import { ethers } from "ethers";
+import { Connection, PublicKey } from "@solana/web3.js";
 const router = express.Router();
 // Get current Battle Royale state
 router.get('/status', async (req, res) => {
@@ -32,38 +33,44 @@ router.get('/status', async (req, res) => {
 });
 router.post('/register', async (req, res) => {
     try {
-        const { wallet, signature, message } = req.body;
+        const { wallet, transactionSignature, signature, message } = req.body;
         if (!wallet) {
             res.status(400).json({ success: false, message: 'Wallet address required' });
             return;
         }
-        if (!signature) {
-            res.status(400).json({ success: false, message: 'Signature required' });
+        if (!transactionSignature) {
+            res.status(400).json({
+                success: false,
+                message: 'Transaction signature required. Please send at least 0.1 SOL to the treasury wallet first.'
+            });
             return;
         }
-        // Standard message format to prevent replay attacks
-        const expectedMessage = message || `Register for Battle Royale with address: ${wallet}`;
-        try {
-            // In ethers v6, verifyMessage is directly on the ethers object
-            const recoveredAddress = ethers.verifyMessage(expectedMessage, signature);
-            // Check if the recovered address matches the claimed wallet address
-            if (recoveredAddress.toLowerCase() !== wallet.toLowerCase()) {
+        // Optional: If you still want signature verification for additional security
+        if (signature) {
+            // Standard message format to prevent replay attacks
+            const expectedMessage = message || `Register for Battle Royale with address: ${wallet}`;
+            try {
+                // In ethers v6, verifyMessage is directly on the ethers object
+                const recoveredAddress = ethers.verifyMessage(expectedMessage, signature);
+                // Check if the recovered address matches the claimed wallet address
+                if (recoveredAddress.toLowerCase() !== wallet.toLowerCase()) {
+                    res.status(401).json({
+                        success: false,
+                        message: 'Invalid signature'
+                    });
+                    return;
+                }
+            }
+            catch (verificationError) {
                 res.status(401).json({
                     success: false,
-                    message: 'Invalid signature'
+                    message: 'Signature verification failed'
                 });
                 return;
             }
         }
-        catch (verificationError) {
-            res.status(401).json({
-                success: false,
-                message: 'Signature verification failed'
-            });
-            return;
-        }
-        // If we get here, the signature is valid
-        const result = await registerPlayer(wallet);
+        // Register player with transaction verification
+        const result = await registerPlayer(wallet, transactionSignature);
         res.json(result);
     }
     catch (error) {
@@ -71,6 +78,97 @@ router.post('/register', async (req, res) => {
         res.status(500).json({ success: false, message: 'Registration failed' });
     }
 });
+// Verify exit transaction (selling tokens back to SOL)
+async function verifyExitTransaction(signature, playerWallet, tokenMint) {
+    try {
+        const connection = new Connection(process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com");
+        // Fetch the transaction details
+        const transaction = await connection.getTransaction(signature, {
+            maxSupportedTransactionVersion: 0,
+            commitment: 'confirmed'
+        });
+        if (!transaction) {
+            return { success: false, reason: "Transaction not found" };
+        }
+        // Check if transaction was successful
+        if (transaction.meta?.err) {
+            return { success: false, reason: "Transaction failed on-chain" };
+        }
+        // Check that the transaction is recent (within last hour for exits)
+        const ONE_HOUR_MS = 60 * 60 * 1000;
+        const txTimestamp = transaction.blockTime ? transaction.blockTime * 1000 : 0;
+        const currentTime = Date.now();
+        if (currentTime - txTimestamp > ONE_HOUR_MS) {
+            return {
+                success: false,
+                reason: "Exit transaction too old (must be within last hour)"
+            };
+        }
+        // Get account keys properly for versioned transactions
+        let accountKeys;
+        if ('accountKeys' in transaction.transaction.message) {
+            accountKeys = transaction.transaction.message.accountKeys;
+        }
+        else {
+            accountKeys = transaction.transaction.message.getAccountKeys({
+                accountKeysFromLookups: transaction.meta?.loadedAddresses
+            }).keySegments().flat();
+        }
+        const playerPubkey = new PublicKey(playerWallet);
+        // Look for the player's wallet in the transaction signers/accounts
+        let playerInvolved = false;
+        for (const key of accountKeys) {
+            if (key.equals(playerPubkey)) {
+                playerInvolved = true;
+                break;
+            }
+        }
+        if (!playerInvolved) {
+            return {
+                success: false,
+                reason: "Player wallet not involved in this transaction"
+            };
+        }
+        // Check token balance changes to verify they sold tokens
+        const preTokenBalances = transaction.meta?.preTokenBalances || [];
+        const postTokenBalances = transaction.meta?.postTokenBalances || [];
+        // Find if player had tokens before and fewer/none after
+        let hadTokensBefore = false;
+        let hasFewerTokensAfter = false;
+        for (const preBalance of preTokenBalances) {
+            if (preBalance.mint === tokenMint &&
+                preBalance.owner === playerWallet &&
+                parseFloat(preBalance.uiTokenAmount.amount) > 0) {
+                hadTokensBefore = true;
+                // Find corresponding post balance
+                const postBalance = postTokenBalances.find(post => post.mint === tokenMint && post.owner === playerWallet);
+                const preAmount = parseFloat(preBalance.uiTokenAmount.amount);
+                const postAmount = postBalance ? parseFloat(postBalance.uiTokenAmount.amount) : 0;
+                if (postAmount < preAmount) {
+                    hasFewerTokensAfter = true;
+                }
+                break;
+            }
+        }
+        if (!hadTokensBefore) {
+            return {
+                success: false,
+                reason: "Player had no tokens to sell"
+            };
+        }
+        if (!hasFewerTokensAfter) {
+            return {
+                success: false,
+                reason: "No token sale detected in transaction"
+            };
+        }
+        return { success: true };
+    }
+    catch (error) {
+        console.error('Error verifying exit transaction:', error);
+        return { success: false, reason: `Verification error: ${error.message}` };
+    }
+}
 // Record player exit
 router.post('/exit', async (req, res) => {
     try {
@@ -82,7 +180,32 @@ router.post('/exit', async (req, res) => {
             });
             return;
         }
-        // Here you would verify the transaction proof
+        // Get current tournament state to verify the token mint
+        const brState = await readBattleRoyaleState();
+        if (!brState.isActive) {
+            res.status(400).json({
+                success: false,
+                message: 'No active tournament'
+            });
+            return;
+        }
+        if (!brState.tokenMint) {
+            res.status(400).json({
+                success: false,
+                message: 'Tournament token not yet created'
+            });
+            return;
+        }
+        // Verify the exit transaction
+        const txVerification = await verifyExitTransaction(exitTx, wallet, brState.tokenMint);
+        if (!txVerification.success) {
+            res.status(400).json({
+                success: false,
+                message: `Exit verification failed: ${txVerification.reason}`
+            });
+            return;
+        }
+        // Record the verified exit
         const result = await recordPlayerExit(wallet, exitTx);
         res.json(result);
     }

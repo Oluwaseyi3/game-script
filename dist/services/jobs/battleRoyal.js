@@ -3,12 +3,105 @@ import { MeteorClient } from "../blockchain/raydium/Meteora.js";
 import { keypair, SOL_MINT, SOL_AMOUNT_TO_DEPOSIT_METEORA, perpTokenConfig, PERP_TOKEN_DEPOSIT_PERCENTAGE, BATTLE_ROYALE_BUY_IN, // Add this to constants (e.g. 0.2 SOL)
 BATTLE_ROYALE_MAX_PLAYERS, // Add this to constants (e.g. 100)
 BATTLE_ROYALE_DURATION, // Add this to constants (e.g. 30 * 60 * 1000) - 30 minutes
+TREASURY_WALLET, // Add this to constants - your treasury wallet address
+MIN_BUY_IN, // Add this to constants (e.g. 0.1 SOL)
  } from "../../constants.js";
 import { sleep } from "../../utils.js";
 import { readState, readBattleRoyaleState, writeBattleRoyaleState } from "../../battleStateManager.js";
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { io } from "../socketServer.js";
 // Utility
 const timestamp = () => `[${new Date().toISOString()}]`;
+/**
+ * Verify a Solana transaction meets the Battle Royale buy-in requirements
+ * @param signature Transaction signature to verify
+ * @param playerWallet The player's wallet address
+ * @returns Promise with verification result
+ */
+async function verifyBuyInTransaction(signature, playerWallet) {
+    try {
+        // Connect to Solana network
+        const connection = new Connection(process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com");
+        // Fetch the transaction details
+        const transaction = await connection.getTransaction(signature, {
+            maxSupportedTransactionVersion: 0,
+            commitment: 'confirmed'
+        });
+        // Check if transaction exists
+        if (!transaction) {
+            return { success: false, reason: "Transaction not found" };
+        }
+        // Check transaction timestamp - 2 days = 48 hours = 172,800,000 milliseconds
+        const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+        const txTimestamp = transaction.blockTime ? transaction.blockTime * 1000 : 0;
+        const currentTime = Date.now();
+        if (currentTime - txTimestamp > TWO_DAYS_MS) {
+            const hoursOld = Math.floor((currentTime - txTimestamp) / (60 * 60 * 1000));
+            return {
+                success: false,
+                reason: `Transaction too old (${hoursOld} hours old, maximum age is 48 hours)`
+            };
+        }
+        // Convert addresses to PublicKey objects
+        const fromPubkey = new PublicKey(playerWallet);
+        const toPubkey = new PublicKey(TREASURY_WALLET);
+        // The minimum amount in lamports (SOL's smallest unit)
+        const minLamports = MIN_BUY_IN * LAMPORTS_PER_SOL;
+        // Check for a valid transfer by examining account changes
+        const preBalances = transaction.meta?.preBalances || [];
+        const postBalances = transaction.meta?.postBalances || [];
+        // Get account keys properly for versioned transactions
+        let accountKeys;
+        if ('accountKeys' in transaction.transaction.message) {
+            // Legacy transaction
+            accountKeys = transaction.transaction.message.accountKeys;
+        }
+        else {
+            // Versioned transaction - we need to get the account keys from the loaded addresses
+            accountKeys = transaction.transaction.message.getAccountKeys({
+                accountKeysFromLookups: transaction.meta?.loadedAddresses
+            }).keySegments().flat();
+        }
+        // Find the indices of the from and to accounts
+        let fromIndex = -1;
+        let toIndex = -1;
+        for (let i = 0; i < accountKeys.length; i++) {
+            if (accountKeys[i].equals(fromPubkey)) {
+                fromIndex = i;
+            }
+            if (accountKeys[i].equals(toPubkey)) {
+                toIndex = i;
+            }
+        }
+        let foundValidTransfer = false;
+        if (fromIndex !== -1 && toIndex !== -1) {
+            // Calculate the SOL transferred
+            const fromBalanceChange = preBalances[fromIndex] - postBalances[fromIndex];
+            const toBalanceChange = postBalances[toIndex] - preBalances[toIndex];
+            // Check if the transfer amount meets our minimum requirement
+            // We check the recipient's balance increase to be more accurate
+            if (toBalanceChange >= minLamports) {
+                foundValidTransfer = true;
+            }
+        }
+        if (!foundValidTransfer) {
+            return {
+                success: false,
+                reason: `No valid transfer of at least ${MIN_BUY_IN} SOL from player to treasury found`
+            };
+        }
+        // Check if transaction was successful
+        if (transaction.meta?.err) {
+            return { success: false, reason: "Transaction failed on-chain" };
+        }
+        // All checks passed
+        return { success: true };
+    }
+    catch (error) {
+        console.error(`${timestamp()} Error verifying transaction:`, error);
+        return { success: false, reason: `Verification error: ${error.message}` };
+    }
+}
 // Initialize a new Battle Royale tournament
 async function initBattleRoyale() {
     console.log(`${timestamp()} Initializing new Battle Royale tournament...`);
@@ -35,7 +128,8 @@ async function initBattleRoyale() {
     return battleRoyaleState;
 }
 // Handle player registration for Battle Royale
-export async function registerPlayer(playerWallet) {
+export async function registerPlayer(playerWallet, transactionSignature // New parameter to receive transaction signature
+) {
     const brState = await readBattleRoyaleState();
     // Check if tournament is active
     if (!brState.isActive) {
@@ -51,13 +145,28 @@ export async function registerPlayer(playerWallet) {
         return { success: false, message: "Already registered" };
     }
     try {
-        // Handle buy-in transaction (this would be implemented in your frontend)
-        // Here we just track that the player joined
+        // Verify the transaction if signature is provided
+        if (!transactionSignature) {
+            return {
+                success: false,
+                message: `Please deposit at least ${MIN_BUY_IN} SOL to ${TREASURY_WALLET} to join the tournament`
+            };
+        }
+        // Verify the transaction meets all requirements
+        const txVerification = await verifyBuyInTransaction(transactionSignature, playerWallet);
+        if (!txVerification.success) {
+            return {
+                success: false,
+                message: `Transaction verification failed: ${txVerification.reason}`
+            };
+        }
+        // If verification passed, add player to tournament
         brState.players.push({
             wallet: playerWallet,
             entryTime: Date.now(),
             exitTime: null,
-            exitTx: null
+            exitTx: null,
+            buyInTx: transactionSignature // Store the transaction signature
         });
         // Update prize pool
         brState.prizePool += BATTLE_ROYALE_BUY_IN;
@@ -98,95 +207,6 @@ export async function recordPlayerExit(playerWallet, exitTx) {
         message: `Exit recorded at ${new Date(exitTime).toISOString()}`
     };
 }
-// Calculate winner rewards after rugpull
-// async function calculateWinners(rugpullTime: number) {
-//     const brState = await readBattleRoyaleState();
-//     // Filter players who exited before rugpull
-//     const successfulPlayers = brState.players.filter(p =>
-//         p.exitTime !== null && p.exitTime < rugpullTime
-//     );
-//     if (successfulPlayers.length === 0) {
-//         console.log(`${timestamp()} No winners in this tournament.`);
-//         return;
-//     }
-//     // Sort by exit time (closest to rugpull first)
-//     successfulPlayers.sort((a, b) => {
-//         const timeToRugpullA = rugpullTime - (a.exitTime || 0);
-//         const timeToRugpullB = rugpullTime - (b.exitTime || 0);
-//         return timeToRugpullA - timeToRugpullB;
-//     });
-//     const winners: BattleRoyaleState["winners"] = [];
-//     // Distribute rewards based on tiers
-//     const prizePool = brState.prizePool;
-//     // Diamond Nerves (last 30 seconds): 40% of the pool
-//     const diamondCutoff = rugpullTime - 30000;
-//     const diamondWinners = successfulPlayers.filter(p => (p.exitTime || 0) >= diamondCutoff);
-//     // Platinum Nerves (30-60 seconds before): 30% of the pool
-//     const platinumCutoff = rugpullTime - 60000;
-//     const platinumWinners = successfulPlayers.filter(
-//         p => (p.exitTime || 0) >= platinumCutoff && (p.exitTime || 0) < diamondCutoff
-//     );
-//     // Gold Nerves (60-120 seconds before): 20% of the pool
-//     const goldCutoff = rugpullTime - 120000;
-//     const goldWinners = successfulPlayers.filter(
-//         p => (p.exitTime || 0) >= goldCutoff && (p.exitTime || 0) < platinumCutoff
-//     );
-//     // Silver Nerves (all other successful exits): 10% of the pool
-//     const silverWinners = successfulPlayers.filter(p => (p.exitTime || 0) < goldCutoff);
-//     // Calculate individual rewards
-//     if (diamondWinners.length > 0) {
-//         const diamondShare = prizePool * 0.4;
-//         const individualDiamondReward = diamondShare / diamondWinners.length;
-//         diamondWinners.forEach(player => {
-//             winners.push({
-//                 wallet: player.wallet,
-//                 tier: "Diamond",
-//                 reward: individualDiamondReward,
-//                 exitTimeToPull: rugpullTime - (player.exitTime || 0)
-//             });
-//         });
-//     }
-//     if (platinumWinners.length > 0) {
-//         const platinumShare = prizePool * 0.3;
-//         const individualPlatinumReward = platinumShare / platinumWinners.length;
-//         platinumWinners.forEach(player => {
-//             winners.push({
-//                 wallet: player.wallet,
-//                 tier: "Platinum",
-//                 reward: individualPlatinumReward,
-//                 exitTimeToPull: rugpullTime - (player.exitTime || 0)
-//             });
-//         });
-//     }
-//     if (goldWinners.length > 0) {
-//         const goldShare = prizePool * 0.2;
-//         const individualGoldReward = goldShare / goldWinners.length;
-//         goldWinners.forEach(player => {
-//             winners.push({
-//                 wallet: player.wallet,
-//                 tier: "Gold",
-//                 reward: individualGoldReward,
-//                 exitTimeToPull: rugpullTime - (player.exitTime || 0)
-//             });
-//         });
-//     }
-//     if (silverWinners.length > 0) {
-//         const silverShare = prizePool * 0.1;
-//         const individualSilverReward = silverShare / silverWinners.length;
-//         silverWinners.forEach(player => {
-//             winners.push({
-//                 wallet: player.wallet,
-//                 tier: "Silver",
-//                 reward: individualSilverReward,
-//                 exitTimeToPull: rugpullTime - (player.exitTime || 0)
-//             });
-//         });
-//     }
-//     // Update state with winners
-//     brState.winners = winners;
-//     await writeBattleRoyaleState(brState);
-//     console.log(`${timestamp()} Winners calculated:`, winners.length);
-// }
 async function calculateWinners(rugpullTime) {
     const brState = await readBattleRoyaleState();
     // Filter players who exited before rugpull
@@ -370,42 +390,6 @@ export async function runBattleRoyale() {
     // scheduleRugpullTremors(brState.poolId!, brState.positionId!, startTime, endTime);
     return brState;
 }
-// // Schedule "tremors" - small liquidity fluctuations to create tension
-// async function scheduleRugpullTremors(poolId: string, positionId: string, startTime: number, endTime: number) {
-//     const tournamentDuration = endTime - startTime;
-//     // Schedule 3 tremors during the tournament
-//     const tremorTimes = [
-//         startTime + (tournamentDuration * 0.5),  // 50% of the way through
-//         startTime + (tournamentDuration * 0.7),  // 70% of the way through
-//         startTime + (tournamentDuration * 0.85), // 85% of the way through
-//     ];
-//     tremorTimes.forEach((tremorTime, index) => {
-//         const delay = tremorTime - Date.now();
-//         if (delay > 0) {
-//             setTimeout(async () => {
-//                 try {
-//                     const meteoraClient = new MeteorClient(keypair.secretKey as any);
-//                     const brState = await readBattleRoyaleState();
-//                     // Only proceed if tournament is still active
-//                     if (!brState.isActive || brState.liquidityWithdrawn) {
-//                         return;
-//                     }
-//                     console.log(`${timestamp()} Executing tremor ${index + 1}...`);
-//                     // For the tremor, we'll temporarily withdraw a small amount of liquidity, then add it back
-//                     // This is simplified - in production you might want a more sophisticated approach
-//                     // Here we would implement a partial liquidity withdrawal
-//                     // Since Meteora doesn't support partial withdrawal directly, 
-//                     // this would need custom implementation
-//                     console.log(`${timestamp()} Tremor ${index + 1} executed`);
-//                     // Send a notification to the frontend about the tremor
-//                     // This would connect to your notification system
-//                 } catch (err) {
-//                     console.error(`${timestamp()} Tremor execution failed:`, err);
-//                 }
-//             }, delay);
-//         }
-//     });
-// }
 // Check if a player is registered for the current tournament
 export async function checkPlayerRegistration(tournamentId, wallet) {
     try {

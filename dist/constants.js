@@ -24,7 +24,6 @@ export const perpTokenConfig = {
     telegram: "https://t.me/PerpRug",
     website: "https://perprug.fun",
 };
-export const SOL_AMOUNT_TO_DEPOSIT_METEORA = 0.01;
 export const PERP_TOKEN_DEPOSIT_PERCENTAGE = 1; // e.g., deposit 99% of the new PERP token
 export const TOKENA_PROGRAM_ID = TOKEN_PROGRAM_ID;
 export const TOKENB_PROGRAM_ID = TOKEN_PROGRAM_ID;
@@ -74,10 +73,13 @@ export const initSdk = async (params) => {
     return raydium;
 };
 //BATTLE ROYAL
+export const SOL_AMOUNT_TO_DEPOSIT_METEORA = 0.01;
 export const BATTLE_ROYALE_BUY_IN = 0.01; // SOL
+export const MIN_BUY_IN = 0.01; // SOL
 export const BATTLE_ROYALE_MAX_PLAYERS = 100;
-export const BATTLE_ROYALE_DURATION = 2 * 60 * 1000; // 30 minutes in milliseconds
+export const BATTLE_ROYALE_DURATION = 15 * 60 * 1000; // 30 minutes in milliseconds
 export const BATTLE_ROYALE_MIN_PLAYERS = 5; // Minimum players to start a tournament
+export const TREASURY_WALLET = "6DCg1ggjkVer4BfaCzh9JKbAnXF4pbyCkJFAwptfMeF3";
 // Tremor configuration - for liquidity "shakes" before the final rugpull
 export const TREMOR_PERCENTAGE = 0.05; // 5% liquidity tremor
 export const BATTLE_ROYALE_FEE_PERCENTAGE = 0.05; // 5% of buy-ins for platform fee
