@@ -1,0 +1,13 @@
+{
+  "isActive": false,
+  "tournamentId": "BR-0-1747822238781",
+  "tokenMint": "F2D1q4NCvtSoRbBcT7cPZiVY9cVNzFrbdcXPE8wuZzRH",
+  "poolId": "AobjpfVDg9uShFiEs9mFJu7a8CPXMSd8kv7vceF9pWZR",
+  "positionId": "BwXcNpwc7gyc6ERFfTiRXCFud7sFXrR1X3nzDQRyNW9P",
+  "startTime": 1747822268196,
+  "endTime": 1747822388196,
+  "players": [],
+  "prizePool": 0,
+  "winners": [],
+  "liquidityWithdrawn": true
+}

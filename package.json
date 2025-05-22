@@ -1,0 +1,45 @@
+{
+  "name": "battleRoyal",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "test": "npx ts-node main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
+    "@metaplex-foundation/umi": "^1.2.0",
+    "@metaplex-foundation/umi-bundle-defaults": "^1.2.0",
+    "@meteora-ag/cp-amm-sdk": "^1.0.2",
+    "@raydium-io/raydium-sdk-v2": "^0.1.133-alpha",
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "^1.98.2",
+    "bull": "^4.16.5",
+    "cors": "^2.8.5",
+    "cron": "^4.3.0",
+    "decimal.js": "^10.5.0",
+    "dotenv": "^16.5.0",
+    "ethers": "^6.14.1",
+    "express": "^5.1.0",
+    "node-cron": "^3.0.2",
+    "pinata": "^2.3.0",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2"
+  },
+  "devDependencies": {
+    "@types/bs58": "^4.0.4",
+    "@types/cors": "^2.8.18",
+    "@types/cron": "^2.0.1",
+    "@types/express": "^5.0.2",
+    "@types/node-cron": "^3.0.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}
