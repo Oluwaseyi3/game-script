@@ -18,7 +18,7 @@ import { sleep, getLatestBlockhash } from "../../utils.js";
 import { readState, writeState, readBattleRoyaleState, writeBattleRoyaleState } from "../../battleStateManager.js";
 import { Connection, Keypair, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { BN } from "@coral-xyz/anchor";
-import { io } from "../socketServer.js";
+// import { io } from ".";
 
 
 // Battle Royale state interface - create this in stateManager.ts
@@ -685,12 +685,12 @@ export async function forceEndTournament(adminKey: string): Promise<{ success: b
         brState.winners = winners;
         await writeBattleRoyaleState(brState);
 
-        // Broadcast tournament ending
-        io.to(`tournament-${brState.tournamentId}`).emit('tournamentEnded', {
-            tournamentId: brState.tournamentId,
-            endTime: brState.endTime,
-            forcedEnd: true
-        });
+        // // Broadcast tournament ending
+        // io.to(`tournament-${brState.tournamentId}`).emit('tournamentEnded', {
+        //     tournamentId: brState.tournamentId,
+        //     endTime: brState.endTime,
+        //     forcedEnd: true
+        // });
 
         return {
             success: true,

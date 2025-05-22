@@ -9,7 +9,6 @@ MIN_BUY_IN, // Add this to constants (e.g. 0.1 SOL)
 import { sleep } from "../../utils.js";
 import { readState, readBattleRoyaleState, writeBattleRoyaleState } from "../../battleStateManager.js";
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { io } from "../socketServer.js";
 // Utility
 const timestamp = () => `[${new Date().toISOString()}]`;
 /**
@@ -524,12 +523,12 @@ export async function forceEndTournament(adminKey) {
         const winners = await calculateWinners(brState.endTime);
         brState.winners = winners;
         await writeBattleRoyaleState(brState);
-        // Broadcast tournament ending
-        io.to(`tournament-${brState.tournamentId}`).emit('tournamentEnded', {
-            tournamentId: brState.tournamentId,
-            endTime: brState.endTime,
-            forcedEnd: true
-        });
+        // // Broadcast tournament ending
+        // io.to(`tournament-${brState.tournamentId}`).emit('tournamentEnded', {
+        //     tournamentId: brState.tournamentId,
+        //     endTime: brState.endTime,
+        //     forcedEnd: true
+        // });
         return {
             success: true,
             message: `Tournament ${brState.tournamentId} force ended`
