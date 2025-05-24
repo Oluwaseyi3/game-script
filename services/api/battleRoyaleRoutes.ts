@@ -76,12 +76,12 @@ router.get('/status', async (req, res) => {
             }))
         };
         res.json({ success: true, data: publicState });
-    } catch (error: any) {
+    } catch (error) {
         console.error('❌ Error getting Battle Royale status:', error);
         res.status(500).json({
             success: false,
             message: 'Failed to get tournament status',
-            error: error.message
+
         });
     }
 });
