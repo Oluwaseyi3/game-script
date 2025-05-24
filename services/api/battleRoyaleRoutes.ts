@@ -52,8 +52,6 @@ router.get('/status', async (req, res) => {
             playerCount: brState.players.length,
             maxPlayers: 100, // From your constants
             prizePool: brState.prizePool,
-
-            // ADD THESE MISSING FIELDS THAT FRONTEND NEEDS:
             tokenMint: brState.tokenMint,
             poolId: brState.poolId,
             positionId: brState.positionId,
