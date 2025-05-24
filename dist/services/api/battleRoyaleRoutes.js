@@ -5,10 +5,35 @@ import { ethers } from "ethers";
 import { Connection, PublicKey } from "@solana/web3.js";
 const router = express.Router();
 // Get current Battle Royale state
+// router.get('/status', async (req, res) => {
+//     try {
+//         const brState = await readBattleRoyaleState();
+//         // Remove sensitive info for public API
+//         const publicState = {
+//             isActive: brState.isActive,
+//             tournamentId: brState.tournamentId,
+//             startTime: brState.startTime,
+//             endTime: brState.endTime,
+//             playerCount: brState.players.length,
+//             maxPlayers: 100, // From your constants
+//             prizePool: brState.prizePool,
+//             winners: brState.winners.map((w: any) => ({
+//                 wallet: w.wallet.slice(0, 4) + '...' + w.wallet.slice(-4), // Mask full address
+//                 tier: w.tier,
+//                 reward: w.reward,
+//                 exitTimeToPull: w.exitTimeToPull
+//             }))
+//         };
+//         res.json({ success: true, data: publicState });
+//     } catch (error) {
+//         console.error('Error getting Battle Royale status:', error);
+//         res.status(500).json({ success: false, message: 'Failed to get tournament status' });
+//     }
+// });
 router.get('/status', async (req, res) => {
     try {
         const brState = await readBattleRoyaleState();
-        // Remove sensitive info for public API
+        // Include ALL necessary data for the frontend
         const publicState = {
             isActive: brState.isActive,
             tournamentId: brState.tournamentId,
@@ -17,18 +42,33 @@ router.get('/status', async (req, res) => {
             playerCount: brState.players.length,
             maxPlayers: 100, // From your constants
             prizePool: brState.prizePool,
+            // ADD THESE MISSING FIELDS THAT FRONTEND NEEDS:
+            tokenMint: brState.tokenMint,
+            poolId: brState.poolId,
+            positionId: brState.positionId,
+            liquidityWithdrawn: brState.liquidityWithdrawn,
+            // Include players (with some privacy protection if needed)
+            players: brState.players.map((player) => ({
+                wallet: player.wallet.slice(0, 4) + '...' + player.wallet.slice(-4), // Mask wallet
+                exitTime: player.exitTime,
+            })),
+            // Include winners with full data
             winners: brState.winners.map((w) => ({
                 wallet: w.wallet.slice(0, 4) + '...' + w.wallet.slice(-4), // Mask full address
                 tier: w.tier,
                 reward: w.reward,
-                exitTimeToPull: w.exitTimeToPull
+                exitTimeToPull: w.exitTimeToPull,
             }))
         };
         res.json({ success: true, data: publicState });
     }
     catch (error) {
-        console.error('Error getting Battle Royale status:', error);
-        res.status(500).json({ success: false, message: 'Failed to get tournament status' });
+        console.error('❌ Error getting Battle Royale status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get tournament status',
+            error: error.message
+        });
     }
 });
 router.post('/register', async (req, res) => {
