@@ -100,7 +100,7 @@ export const BATTLE_ROYALE_BUY_IN = 0.01; // SOL
 
 export const MIN_BUY_IN = 0.01; // SOL
 export const BATTLE_ROYALE_MAX_PLAYERS = 100;
-export const BATTLE_ROYALE_DURATION = 50 * 60 * 1000; // 30 minutes in milliseconds
+export const BATTLE_ROYALE_DURATION = 59 * 60 * 1000; // 30 minutes in milliseconds
 export const BATTLE_ROYALE_MIN_PLAYERS = 5; // Minimum players to start a tournament
 export const TREASURY_WALLET = "6DCg1ggjkVer4BfaCzh9JKbAnXF4pbyCkJFAwptfMeF3"
 // Tremor configuration - for liquidity "shakes" before the final rugpull
