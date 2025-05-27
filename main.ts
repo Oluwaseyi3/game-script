@@ -24,37 +24,63 @@ app.get('/health', (req, res) => {
     res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
+// Optional API: Countdown to next Battle Royale
+app.get('/api/nextBattleRoyale', (req, res) => {
+    const next = getNextBattleRoyaleTime();
+    res.json({
+        nextLaunchUTC: next.toISOString(),
+        countdownSeconds: Math.floor((next.getTime() - new Date().getTime()) / 1000),
+    });
+});
+
 // Create HTTP server
 const server = http.createServer(app);
 
-// Initialize WebSocket server on the same HTTP server
+// Battle Royale schedule (Perprug Contest) - runs at 00:00, 08:00, and 16:00 UTC daily
+cron.schedule('0 0,8,16 * * *', () => {
+    console.log('Starting scheduled Battle Royale tournament (Perprug Contest)...');
+    runBattleRoyale().catch(err =>
+        console.error('Error starting scheduled Battle Royale tournament (Perprug Contest):', err)
+    );
+});
 
+// Countdown logic
+function getNextBattleRoyaleTime(): Date {
+    const now = new Date();
+    const hours = [0, 8, 16]; // Scheduled times in UTC
 
-// Battle Royale schedule - runs at specific times (e.g., 12PM and 8PM UTC daily)
-// cron.schedule('0 12,20 * * *', () => {
-//   console.log('Starting scheduled Battle Royale tournament...');
-//   runBattleRoyale().catch(err =>
-//     console.error('Error starting Battle Royale tournament:', err)
-//   );
-// });
-
-// Run a test Battle Royale tournament on startup
-(async () => {
-    console.log('Starting Battle Royale tournament (test run)...');
-    try {
-        await runBattleRoyale();
-        console.log('Battle Royale tournament completed.');
-    } catch (err) {
-        console.error('Error during Battle Royale tournament test run:', err);
+    for (const hour of hours) {
+        const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour, 0, 0));
+        if (next > now) return next;
     }
-})();
+
+    // If none left today, return next day's 00:00 UTC
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+}
+
+function logNextLaunchCountdown() {
+    const next = getNextBattleRoyaleTime();
+    const now = new Date();
+    const diffMs = next.getTime() - now.getTime();
+
+    const totalSeconds = Math.floor(diffMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    console.log(`Next Battle Royale (Perprug Contest) starts in ${hours}h ${minutes}m ${seconds}s at ${next.toISOString()}`);
+}
+
+// Start 30-second interval live countdown
+logNextLaunchCountdown();
+setInterval(logNextLaunchCountdown, 30 * 1000);
 
 // Start the server
 const PORT = parseInt(process.env.PORT || '3000', 10);
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`REST API available at http://localhost:${PORT}/api/battleRoyale`);
-    console.log(`WebSocket server available at ws://localhost:${PORT}`);
+    console.log('Scheduled "Perprug Contest" (Battle Royale) will run at 00:00, 08:00, and 16:00 UTC daily.');
 });
 
 // Graceful shutdown for Render
